@@ -11,8 +11,8 @@ import streamlit as st
 from lib import forecasting
 from lib.supabase_client import SupabaseQueryError
 
-st.set_page_config(page_title="Forecasting", page_icon="🔮", layout="wide")
-st.title("🔮 Forecasting Suhu & Kelembaban")
+st.set_page_config(page_title="Forecasting", layout="wide")
+st.title("Forecasting Suhu & Kelembaban")
 
 st.markdown(
     f"""

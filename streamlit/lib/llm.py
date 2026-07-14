@@ -20,6 +20,7 @@ def _build_prompt(latest: dict, stats: dict, forecast_summary: dict | None) -> s
         "Berikan komentar singkat (maksimal 120 kata) dalam Bahasa Indonesia,",
         "berupa observasi dan rekomendasi praktis berdasarkan data berikut.",
         "Jangan membuat klaim medis atau pertanian yang berlebihan.",
+        "Jangan gunakan emoji atau simbol ikon apa pun dalam jawabanmu.",
         "",
         f"Data terbaru: suhu {_fmt(latest.get('suhu'), ' C')}, "
         f"kelembaban {_fmt(latest.get('kelembaban'), ' %')} pada {latest.get('timestamp')}.",

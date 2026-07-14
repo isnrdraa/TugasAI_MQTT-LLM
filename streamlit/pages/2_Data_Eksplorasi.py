@@ -13,8 +13,8 @@ from lib import data
 from lib.config import TIMEZONE
 from lib.supabase_client import SupabaseQueryError
 
-st.set_page_config(page_title="Data Eksplorasi", page_icon="📊", layout="wide")
-st.title("📊 Data Eksplorasi")
+st.set_page_config(page_title="Data Eksplorasi", layout="wide")
+st.title("Data Eksplorasi")
 st.caption("Statistik deskriptif dari seluruh data yang sudah terekam (maks. 7 hari terakhir).")
 
 start_dt, end_dt = data.compute_range("7 Hari")

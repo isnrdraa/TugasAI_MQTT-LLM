@@ -14,10 +14,10 @@ from lib import data, llm, mqtt_live
 from lib.config import GROQ_CONFIGURED, TIMEZONE
 from lib.supabase_client import SupabaseQueryError
 
-st.set_page_config(page_title="Monitoring Suhu & Kelembaban", page_icon="🌡️", layout="wide")
+st.set_page_config(page_title="Monitoring Suhu & Kelembaban", layout="wide")
 
-st.title("🌡️ Monitoring Suhu & Kelembaban")
-st.caption("Data IoT dari HiveMQ Cloud, direkam via recorder.py, dimirror ke Supabase.")
+st.title("Monitoring Suhu & Kelembaban")
+st.caption("Data IoT suhu & kelembaban dari HiveMQ Cloud.")
 
 with st.sidebar:
     st.header("Pengaturan")
@@ -39,6 +39,11 @@ with st.sidebar:
                            help="Default: polling Supabase tiap 5 detik. Kalau aktif, "
                                 "dashboard subscribe langsung ke broker HiveMQ Cloud "
                                 "(satu koneksi dipakai bersama semua pengunjung).")
+    auto_refresh_ai = st.toggle("Auto-refresh analisis AI", value=False,
+                                 help="Default nonaktif: analisis AI hanya dihitung sekali saat "
+                                      "halaman dibuka dan saat tombol 'Minta analisis ulang' "
+                                      "ditekan. Kalau aktif, analisis akan otomatis dihitung ulang "
+                                      "tiap kali ada data baru masuk.")
 
 st_autorefresh(interval=5000, key="monitoring_autorefresh")
 
@@ -49,7 +54,7 @@ try:
     if live_mode:
         live = mqtt_live.get_live_values()
         latest = {"timestamp": live["timestamp"], "suhu": live["suhu"], "kelembaban": live["kelembaban"]}
-        status = "🟢 Terhubung" if live["connected"] else "🟠 Menghubungkan..."
+        status = "Terhubung" if live["connected"] else "Menghubungkan..."
         st.caption(f"Mode MQTT langsung -- {status}")
     else:
         latest = data.get_latest_reading()
@@ -94,15 +99,36 @@ else:
     )
     st.plotly_chart(fig, width="stretch")
 
-st.subheader("🤖 Analisis AI (Groq / LLaMA3)")
+st.subheader("Analisis AI (Groq / LLaMA3)")
 if not GROQ_CONFIGURED:
     st.info("Komentator AI belum dikonfigurasi. Isi GROQ_API_KEY di secrets untuk mengaktifkan.")
 else:
     if "llm_nonce" not in st.session_state:
         st.session_state.llm_nonce = 0
-    if st.button("Minta analisis ulang"):
+    if "llm_result" not in st.session_state:
+        st.session_state.llm_result = None
+    if "llm_last_ts" not in st.session_state:
+        st.session_state.llm_last_ts = None
+
+    manual_refresh = st.button("Minta analisis ulang")
+    if manual_refresh:
         st.session_state.llm_nonce += 1
 
     latest_ts_str = latest["timestamp"].isoformat() if latest and latest.get("timestamp") is not None else "none"
-    commentary = llm.get_commentary(latest_ts_str, latest or {}, stats, None, st.session_state.llm_nonce)
-    st.info(commentary)
+
+    # Default (auto_refresh_ai=False): analisis hanya dihitung sekali di awal dan saat
+    # tombol ditekan -- TIDAK mengikuti autorefresh 5 detik / data baru dari Supabase-MQTT,
+    # supaya tidak boros kuota Groq gratis dan teksnya tidak berubah-ubah tiap 20 detik.
+    should_fetch = (
+        st.session_state.llm_result is None
+        or manual_refresh
+        or (auto_refresh_ai and latest_ts_str != st.session_state.llm_last_ts)
+    )
+
+    if should_fetch:
+        st.session_state.llm_result = llm.get_commentary(
+            latest_ts_str, latest or {}, stats, None, st.session_state.llm_nonce
+        )
+        st.session_state.llm_last_ts = latest_ts_str
+
+    st.info(st.session_state.llm_result)
