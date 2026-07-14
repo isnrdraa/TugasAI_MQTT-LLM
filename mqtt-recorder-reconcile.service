@@ -1,0 +1,9 @@
+[Unit]
+Description=MQTT Recorder - reconcile CSV ke Supabase (menutup baris yang gagal push)
+
+[Service]
+Type=oneshot
+User=isnrdra
+Group=isnrdra
+WorkingDirectory=/home/isnrdra/mqtt-recorder
+ExecStart=/home/isnrdra/mqtt-recorder/venv/bin/python /home/isnrdra/mqtt-recorder/backfill_supabase.py

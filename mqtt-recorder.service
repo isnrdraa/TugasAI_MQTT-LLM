@@ -1,0 +1,23 @@
+[Unit]
+Description=MQTT Recorder - logging data suhu & kelembaban dari HiveMQ Cloud
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=isnrdra
+Group=isnrdra
+WorkingDirectory=/home/isnrdra/mqtt-recorder
+ExecStart=/home/isnrdra/mqtt-recorder/venv/bin/python /home/isnrdra/mqtt-recorder/recorder.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/isnrdra/mqtt-recorder/logs/service.out.log
+StandardError=append:/home/isnrdra/mqtt-recorder/logs/service.err.log
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target
