@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Training model Prophet + evaluasi, sesuai jendela spesifikasi PDF penugasan.
+"""Training model Prophet + evaluasi, sesuai spesifikasi tugas.
 
   Data     : diambil dari SUPABASE (REST API), dibatasi periode recording
              13 - 20 Juli 2026 saja.
@@ -51,7 +51,7 @@ def load_data(args):
         print(f"Mengambil data dari Supabase ({table}) ...")
         raw = core.fetch_supabase_range(url, key, table, start.isoformat(), end.isoformat())
 
-    # Batasi ke periode recording sesuai PDF, apapun sumbernya
+    # Batasi ke periode recording sesuai spesifikasi, apapun sumbernya
     return raw[(raw["timestamp"] >= start) & (raw["timestamp"] < end)].reset_index(drop=True)
 
 
@@ -78,9 +78,9 @@ def main():
     print(f"  Baris mentah      : {len(raw)}")
     print(f"  Titik per jam     : {span['points']}")
     print(f"  Rentang data      : {span['first']}  s/d  {span['last']}")
-    print(f"  Durasi            : {span['days']:.2f} hari (periode PDF: {core.TRAIN_START} s/d {core.TEST_DATE})")
+    print(f"  Durasi            : {span['days']:.2f} hari (periode spesifikasi: {core.TRAIN_START} s/d {core.TEST_DATE})")
 
-    print(f"\nEvaluasi sesuai PDF: training {core.TRAIN_START} s/d {core.TRAIN_END}, "
+    print(f"\nEvaluasi sesuai spesifikasi: training {core.TRAIN_START} s/d {core.TRAIN_END}, "
           f"testing {core.TEST_DATE} ...")
     evaluation = core.evaluate_fixed(hourly)
     metrics_out = {

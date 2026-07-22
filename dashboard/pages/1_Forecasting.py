@@ -1,6 +1,5 @@
 """Halaman Forecasting. Semua data dari Supabase. Dua mode jendela waktu:
-tetap sesuai tabel PDF penugasan (default), atau dinamis 6 jam setelah data
-terakhir (sesuai klarifikasi WhatsApp dosen)."""
+tetap sesuai spesifikasi (default), atau dinamis 6 jam setelah data terakhir."""
 
 import sys
 from pathlib import Path
@@ -23,16 +22,16 @@ st.set_page_config(page_title="Forecasting", layout="wide")
 st.title("Forecasting Suhu & Kelembaban")
 st.caption("Sumber data: Supabase (hasil recording MQTT). Model: Prophet, resolusi per jam.")
 
-MODE_FIXED = "Sesuai spesifikasi PDF (jendela tetap)"
+MODE_FIXED = "Sesuai spesifikasi tugas (jendela tetap)"
 MODE_DYNAMIC = "Dinamis (6 jam setelah data terakhir)"
 mode = st.radio(
     "Jendela waktu forecasting",
     [MODE_FIXED, MODE_DYNAMIC],
     horizontal=True,
     help=(
-        "Mode PDF: training 13-19 Juli, testing 20 Juli, forecast 21 Juli 00:00-06:00 WIB "
-        "(6 jam setelah akhir periode recording). Mode dinamis: forecast 6 jam setelah "
-        "timestamp data terakhir yang terekam, sesuai klarifikasi dosen di WhatsApp."
+        "Jendela tetap: training 13-19 Juli, testing 20 Juli, forecast 21 Juli "
+        "00:00-06:00 WIB (6 jam setelah akhir periode recording). Mode dinamis: "
+        "forecast 6 jam setelah timestamp data terakhir yang terekam."
     ),
 )
 
@@ -129,7 +128,7 @@ def render_ai_commentary(span: dict, hourly: pd.DataFrame, result: dict):
 
 
 # ---------------------------------------------------------------------------
-# Mode TETAP: jendela kalender sesuai tabel spesifikasi PDF
+# Mode TETAP: jendela kalender sesuai spesifikasi tugas
 # ---------------------------------------------------------------------------
 if mode == MODE_FIXED:
     st.markdown(
@@ -155,7 +154,7 @@ Sesuai tabel spesifikasi penugasan:
         st.stop()
 
     span = forecasting.get_span_info(hourly)
-    st.subheader("Data historis yang dipakai (periode recording PDF)")
+    st.subheader("Data historis yang dipakai (periode recording 13-20 Juli)")
     render_span(span)
 
     st.divider()
@@ -205,7 +204,7 @@ Sesuai tabel spesifikasi penugasan:
     with st.spinner("Mengevaluasi model pada data testing..."):
         evaluation = forecasting.evaluate_fixed_cached()
     if evaluation is None:
-        st.info("Data training/testing pada jendela PDF belum lengkap.")
+        st.info("Data training/testing pada jendela tetap belum lengkap.")
     else:
         render_evaluation(evaluation)
 
@@ -217,8 +216,8 @@ Sesuai tabel spesifikasi penugasan:
 else:
     st.markdown(
         f"""
-Mode ini mengikuti klarifikasi dosen (WhatsApp): forecast **{forecasting.FORECAST_HORIZON_HOURS} jam
-setelah timestamp data terakhir yang terekam**, menggunakan seluruh data historis.
+Mode ini melakukan forecast **{forecasting.FORECAST_HORIZON_HOURS} jam setelah timestamp
+data terakhir yang terekam**, menggunakan seluruh data historis yang tersedia.
 """
     )
 

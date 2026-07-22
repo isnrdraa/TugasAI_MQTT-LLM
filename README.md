@@ -208,8 +208,8 @@ sqlite3 ~/mqtt-recorder/data/sensor_data.db \
   "SELECT * FROM sensor_data ORDER BY id DESC LIMIT 10;"
 ```
 
-Hitung total baris (berguna untuk bukti "recording jalan 7 hari penuh" di laporan —
-idealnya sekitar `7 hari * 24 jam * 3600 detik / 20 detik ≈ 30240` baris):
+Hitung total baris (recording 7 hari penuh idealnya sekitar
+`7 hari * 24 jam * 3600 detik / 20 detik ≈ 30240` baris):
 
 ```bash
 sqlite3 ~/mqtt-recorder/data/sensor_data.db "SELECT COUNT(*) FROM sensor_data;"
@@ -311,7 +311,7 @@ sudo systemctl start mqtt-recorder-reconcile.service
 Selain lewat dashboard, forecasting bisa dijalankan langsung dari terminal.
 Data diambil **dari Supabase** (butuh `SUPABASE_URL` + `SUPABASE_ANON_KEY`
 atau `SUPABASE_KEY` di `.env` root project), dibatasi persis periode recording
-spesifikasi PDF (13-20 Juli 2026):
+spesifikasi tugas (13-20 Juli 2026):
 
 ```bash
 pip install -r requirements.txt   # sekali saja
@@ -341,10 +341,10 @@ menulis, dan memakai `anon` key (bukan `service_role` yang dipakai recorder).
 Tiga halaman: **Monitoring** (grafik historis, data terbaru, statistik, filter
 rentang waktu, mode real-time via polling Supabase 5 detik atau opsional MQTT
 langsung -- MQTT hanya untuk tampilan live, bukan sumber data), **Forecasting**
-(Prophet, dua mode: default **jendela tetap sesuai PDF** -- training 13-19 Juli,
+(Prophet, dua mode: default **jendela tetap sesuai spesifikasi** -- training 13-19 Juli,
 testing 20 Juli dengan RMSE/MAE/MAPE, forecast 21 Juli 00:00-06:00 WIB, plus
 verifikasi prediksi vs aktual pada jendela forecast; atau mode **dinamis** 6 jam
-setelah data terakhir sesuai klarifikasi WhatsApp dosen), **Data Eksplorasi**
+setelah data terakhir yang terekam), **Data Eksplorasi**
 (statistik deskriptif, histogram, korelasi, boxplot). Ada juga komentator AI
 (Groq API, model LLaMA3 gratis) di halaman Monitoring dan Forecasting.
 
@@ -384,7 +384,7 @@ Buka `http://localhost:8501` — cek halaman Monitoring update tiap ±20 detik
 (sesuai interval tulis recorder), coba toggle "Mode real-time langsung (MQTT)",
 ganti filter rentang waktu, dan klik "Minta analisis ulang" untuk uji komentator AI.
 
-Halaman **Forecasting** default menampilkan jendela tetap sesuai PDF: rentang
+Halaman **Forecasting** default menampilkan jendela tetap sesuai spesifikasi: rentang
 data periode recording 13-20 Juli, prediksi 21 Juli 00:00-06:00 WIB (grafik +
 tabel + verifikasi vs aktual karena datanya sudah terekam), dan evaluasi
 RMSE/MAE/MAPE pada data testing 20 Juli. Radio di atas halaman bisa memindah

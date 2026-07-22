@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prediksi suhu & kelembaban untuk jendela forecasting spesifikasi PDF:
+"""Prediksi suhu & kelembaban untuk jendela forecasting spesifikasi tugas:
 21 Juli 2026, 00:00 - 06:00 WIB (per jam, 6 titik) -- yaitu 6 jam setelah
 akhir periode recording 13-20 Juli.
 
@@ -42,7 +42,7 @@ def load_models():
 
 def main():
     parser = argparse.ArgumentParser(
-        description=f"Prediksi {core.FORECAST_DATE} 00:00-06:00 WIB (jendela spesifikasi PDF)"
+        description=f"Prediksi {core.FORECAST_DATE} 00:00-06:00 WIB (jendela spesifikasi tugas)"
     )
     parser.add_argument("--out-dir", default=str(ROOT_DIR / "data"),
                         help="Folder output forecast_6h.csv (default: data/)")

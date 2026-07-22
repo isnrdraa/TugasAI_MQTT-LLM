@@ -1,10 +1,10 @@
 """Lapisan data Streamlit untuk halaman Forecasting. Semua data HANYA dari
 Supabase (MQTT tidak dipakai di sini). Dua mode jendela waktu:
 
-1. TETAP (default, sesuai tabel PDF): data dibatasi periode recording
+1. TETAP (default, sesuai spesifikasi tugas): data dibatasi periode recording
    13-20 Juli 2026; training 13-19, testing 20, forecast 21 Juli 00:00-06:00.
-2. DINAMIS (klarifikasi WhatsApp): seluruh data historis, forecast 6 jam
-   setelah data terakhir, backtest 24 jam terakhir.
+2. DINAMIS: seluruh data historis, forecast 6 jam setelah data terakhir
+   yang terekam, backtest 24 jam terakhir.
 
 Logika model (Prophet, split, metrik) ada di forecasting/core.py di root
 project -- dipakai bersama dengan script CLI model_training.py & predict.py.
@@ -40,11 +40,11 @@ forecast_table = core.forecast_table
 
 
 # ---------------------------------------------------------------------------
-# Mode TETAP (jendela kalender PDF) -- datanya statis, cache boleh lama
+# Mode TETAP (jendela kalender tetap) -- datanya statis, cache boleh lama
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_hourly_fixed() -> pd.DataFrame:
-    """Data per jam periode recording PDF saja: 13 Juli 00:00 s/d 21 Juli 00:00."""
+    """Data per jam periode recording sesuai spesifikasi: 13 Juli 00:00 s/d 21 Juli 00:00."""
     start, end = core.fixed_window_bounds(TIMEZONE)
     raw = supabase_client.fetch_all_range(
         start.isoformat(), (end - pd.Timedelta(seconds=1)).isoformat()
@@ -66,7 +66,7 @@ def forecast_fixed_cached() -> dict:
 def load_forecast_window_actual() -> pd.DataFrame:
     """Data aktual per jam pada jendela forecast (21 Juli 00:00-06:00), untuk
     verifikasi prediksi vs kenyataan -- tersedia karena recorder tetap jalan
-    setelah periode PDF berakhir."""
+    setelah periode recording berakhir."""
     periods = core.fixed_forecast_periods(TIMEZONE)
     end = periods[-1] + pd.Timedelta(hours=1)
     raw = supabase_client.fetch_all_range(

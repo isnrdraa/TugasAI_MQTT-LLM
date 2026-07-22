@@ -6,12 +6,12 @@
 
 Ada DUA mode jendela waktu, dua-duanya bersumber HANYA dari data Supabase:
 
-1. TETAP (default, sesuai tabel spesifikasi PDF): training 13-19 Juli,
+1. TETAP (default, sesuai spesifikasi tugas): training 13-19 Juli,
    testing 20 Juli (RMSE/MAE/MAPE), forecast 21 Juli 00:00-06:00 WIB --
    yaitu 6 jam setelah akhir periode recording 13-20 Juli.
-2. DINAMIS (sesuai klarifikasi WhatsApp dosen): forecast 6 jam setelah
-   timestamp data TERAKHIR yang terekam; evaluasi backtest dengan data
-   testing = 24 jam terakhir (analog "testing 1 hari").
+2. DINAMIS: forecast 6 jam setelah timestamp data TERAKHIR yang terekam;
+   evaluasi backtest dengan data testing = 24 jam terakhir (analog
+   "testing 1 hari").
 """
 
 import logging
@@ -33,11 +33,11 @@ except Exception as exc:  # pragma: no cover - tergantung lingkungan deploy
 
 TARGETS = ("suhu", "kelembaban")
 FORECAST_HORIZON_HOURS = 6
-BACKTEST_TEST_HOURS = 24  # data testing = 24 jam terakhir (analog "testing 1 hari" di PDF)
-MIN_TRAINING_DAYS = 7  # "Minimal ada 7 hari data" (spek tugas)
+BACKTEST_TEST_HOURS = 24  # data testing = 24 jam terakhir (analog "testing 1 hari" di spesifikasi)
+MIN_TRAINING_DAYS = 7  # "Minimal ada 7 hari data" (spesifikasi tugas)
 DEFAULT_TZ = ZoneInfo("Asia/Jakarta")
 
-# --- Jendela kalender TETAP sesuai tabel spesifikasi PDF penugasan ---
+# --- Jendela kalender TETAP sesuai spesifikasi tugas ---
 #   Training : 13 - 19 Juli 2026 (6 hari)
 #   Testing  : 20 Juli 2026 (1 hari, untuk RMSE/MAE/MAPE)
 #   Forecast : 21 Juli 2026, 00:00 - 06:00 WIB (per jam, 6 titik)
@@ -48,7 +48,7 @@ FORECAST_DATE = "2026-07-21"
 
 
 def fixed_window_bounds(tz=DEFAULT_TZ) -> tuple[pd.Timestamp, pd.Timestamp]:
-    """(start, end-eksklusif) rentang data mode PDF: 13 Juli 00:00 s/d
+    """(start, end-eksklusif) rentang data jendela tetap: 13 Juli 00:00 s/d
     21 Juli 00:00 = periode recording 13-20 Juli."""
     start = pd.Timestamp(TRAIN_START, tz=tz)
     end = pd.Timestamp(TEST_DATE, tz=tz) + pd.Timedelta(days=1)
@@ -71,7 +71,7 @@ def split_fixed_train_test(hourly_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Da
 
 
 def evaluate_fixed(hourly_df: pd.DataFrame) -> dict | None:
-    """Evaluasi sesuai PDF: model dilatih pada 13-19 Juli, diminta memprediksi
+    """Evaluasi sesuai spesifikasi: model dilatih pada 13-19 Juli, diminta memprediksi
     per jam tanggal 20 Juli, dibandingkan dengan aktualnya (RMSE/MAE/MAPE)."""
     train_df, test_df = split_fixed_train_test(hourly_df)
     if train_df.empty or test_df.empty:
