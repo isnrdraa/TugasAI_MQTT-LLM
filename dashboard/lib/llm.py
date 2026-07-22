@@ -2,10 +2,18 @@
 cache (ttl=300) supaya komentar AI tidak dipanggil ulang tiap auto-refresh
 5 detik -- hanya saat halaman dimuat, tombol ditekan, atau nonce berubah."""
 
+import importlib
+
 import streamlit as st
 
 from lib.config import GROQ_API_KEY, GROQ_MODEL, GROQ_CONFIGURED
+
+# reload() wajib: file watcher Streamlit Cloud hanya me-reload module di dalam
+# folder dashboard/, jadi tanpa ini groq_commentator.py versi lama bisa
+# tertinggal di sys.modules setelah git push (hot-reload parsial).
 from llm_integration import groq_commentator
+
+groq_commentator = importlib.reload(groq_commentator)
 
 
 @st.cache_data(ttl=300, show_spinner="Meminta analisis AI...")

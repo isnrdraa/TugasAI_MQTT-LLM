@@ -11,14 +11,21 @@ project -- dipakai bersama dengan script CLI model_training.py & predict.py.
 Modul ini hanya menambahkan: pengambilan data dari Supabase + cache Streamlit.
 """
 
+import importlib
+
 import pandas as pd
 import streamlit as st
 
 from lib import supabase_client
 from lib.config import TIMEZONE
 
-# Root project sudah ada di sys.path (di-insert oleh tiap halaman dashboard)
+# Root project sudah ada di sys.path (di-insert oleh tiap halaman dashboard).
+# reload() wajib: file watcher Streamlit Cloud hanya me-reload module di dalam
+# folder dashboard/, jadi tanpa ini core.py versi lama bisa tertinggal di
+# sys.modules setelah git push (hot-reload parsial).
 from forecasting import core
+
+core = importlib.reload(core)
 
 # Re-export supaya halaman cukup import satu modul ini
 Prophet = core.Prophet
