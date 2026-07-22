@@ -22,7 +22,8 @@ import paho.mqtt.client as mqtt
 import requests
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent
+# File ini ada di recording/, sedangkan .env, data/, dan logs/ ada di root project.
+BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 MQTT_HOST = os.environ["MQTT_HOST"]

@@ -6,38 +6,47 @@ Sistem ini **hanya membaca/mencatat data**, tidak melakukan publish/kontrol apap
 
 ## Struktur folder
 
+Mengikuti struktur project yang diminta di penugasan:
+
 ```
-~/mqtt-recorder/
-  recorder.py                     # script utama
-  backfill_supabase.py            # reconcile CSV -> Supabase (idempotent)
-  requirements.txt
-  .env                             # kredensial asli (JANGAN dibagikan)
-  .env.example                     # template tanpa kredensial
-  supabase_schema.sql              # SQL setup tabel Supabase
-  mqtt-recorder.service            # unit file systemd (recorder utama)
-  mqtt-recorder-reconcile.service  # unit file systemd (reconcile, oneshot)
-  mqtt-recorder-reconcile.timer    # jadwal reconcile (tiap 6 jam)
-  README.md
-  venv/                            # virtualenv Python (dibuat saat instalasi)
-  data/
-    sensor_data.db
-    sensor_data.csv
-  logs/
-    recorder.log            # log aplikasi (rotasi harian, 14 hari)
-    reconcile.log           # log tiap kali reconcile jalan
-    service.out.log         # stdout systemd
-    service.err.log         # stderr systemd
-  streamlit/                       # dashboard publik (deploy terpisah, lihat bagian akhir)
-    streamlit_app.py                # halaman Monitoring (entry point)
+~/mqtt-recorder/                       # (root project = Tugas_MQTT_Forecasting)
+  recording/
+    mqtt_subscriber.py                 # recorder utama (Python di VPS/laptop)
+    backfill_supabase.py               # reconcile CSV -> Supabase (idempotent)
+    mqtt-recorder.service              # unit file systemd (recorder utama)
+    mqtt-recorder-reconcile.service    # unit file systemd (reconcile, oneshot)
+    mqtt-recorder-reconcile.timer      # jadwal reconcile (tiap 6 jam)
+  forecasting/
+    core.py                            # logika bersama (Prophet, backtest, metrik)
+    model_training.py                  # CLI: training + evaluasi RMSE/MAE/MAPE
+    predict.py                         # CLI: prediksi 6 jam setelah data terakhir
+  dashboard/
+    streamlit_app.py                   # halaman Monitoring (entry point)
     pages/
       1_Forecasting.py
       2_Data_Eksplorasi.py
     lib/
       config.py, supabase_client.py, data.py, mqtt_live.py, llm.py, forecasting.py
-    requirements.txt
     .streamlit/secrets.toml.example
+  llm_integration/
+    groq_commentator.py                # komentator AI (Groq / LLaMA3)
+  data/
+    sensor_data.db                     # dibuat oleh recorder (tidak di-commit)
+    sensor_data.csv
+  logs/
+    recorder.log                       # log aplikasi (rotasi harian, 14 hari)
+    reconcile.log, service.out.log, service.err.log
+  requirements.txt                     # satu file untuk semua komponen
+  .env / .env.example                  # kredensial (asli JANGAN dibagikan)
+  supabase_schema.sql                  # SQL setup tabel Supabase
+  README.md
+  venv/                                # virtualenv Python (dibuat saat instalasi)
   .gitignore
 ```
+
+Catatan: `esp32_mqtt_bridge.ino` tidak ada karena recording memakai jalur Python
+(`recording/mqtt_subscriber.py`), bukan bridge ESP32 -- di penugasan keduanya
+alternatif satu sama lain.
 
 ## Cara kerja singkat
 
@@ -136,7 +145,7 @@ perlu insert tanpa terblokir Row Level Security.
 ```bash
 cd ~/mqtt-recorder
 source venv/bin/activate
-python recorder.py
+python recording/mqtt_subscriber.py
 # tekan Ctrl+C untuk berhenti setelah yakin data masuk
 ```
 
@@ -147,7 +156,7 @@ sehingga tidak perlu membuat user baru. Jika Anda ingin memakai user khusus (ops
 lebih terisolasi), lihat bagian "User khusus (opsional)" di bawah.
 
 ```bash
-sudo cp ~/mqtt-recorder/mqtt-recorder.service /etc/systemd/system/mqtt-recorder.service
+sudo cp ~/mqtt-recorder/recording/mqtt-recorder.service /etc/systemd/system/mqtt-recorder.service
 sudo systemctl daemon-reload
 sudo systemctl enable mqtt-recorder.service   # auto-start saat boot
 sudo systemctl start mqtt-recorder.service
@@ -173,13 +182,13 @@ tail -f ~/mqtt-recorder/logs/recorder.log
 
 ### Install reconcile timer (hanya jika Supabase dipakai)
 
-Timer ini menjalankan `backfill_supabase.py` tiap 6 jam untuk menutup baris yang
+Timer ini menjalankan `recording/backfill_supabase.py` tiap 6 jam untuk menutup baris yang
 gagal push ke Supabase (mis. Supabase sempat down lebih lama dari retry bawaan
-`recorder.py`). Aman dijalankan berkali-kali (idempotent, pakai upsert).
+`recording/mqtt_subscriber.py`). Aman dijalankan berkali-kali (idempotent, pakai upsert).
 
 ```bash
-sudo cp ~/mqtt-recorder/mqtt-recorder-reconcile.service /etc/systemd/system/
-sudo cp ~/mqtt-recorder/mqtt-recorder-reconcile.timer /etc/systemd/system/
+sudo cp ~/mqtt-recorder/recording/mqtt-recorder-reconcile.service /etc/systemd/system/
+sudo cp ~/mqtt-recorder/recording/mqtt-recorder-reconcile.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now mqtt-recorder-reconcile.timer
 ```
@@ -224,7 +233,7 @@ curl -s "$SUPABASE_URL/rest/v1/sensor_data?select=*&order=id.desc&limit=10" \
 
 ## 6. Operasional lain
 
-Restart service (mis. setelah update `.env` atau `recorder.py`):
+Restart service (mis. setelah update `.env` atau `recording/mqtt_subscriber.py`):
 
 ```bash
 sudo systemctl restart mqtt-recorder.service
@@ -263,7 +272,7 @@ lalu ulangi langkah instalasi service di atas.
 SQLite & CSV adalah sumber data utama dan **selalu** ditulis lengkap tiap siklus,
 terlepas dari status Supabase. Push ke Supabase punya 2 lapis penanganan gagal:
 
-1. **Retry otomatis di `recorder.py`** — tiap baris dicoba push sampai
+1. **Retry otomatis di `recording/mqtt_subscriber.py`** — tiap baris dicoba push sampai
    `SUPABASE_MAX_ATTEMPTS` kali (default 3) dengan jeda `SUPABASE_RETRY_BACKOFF_SECONDS`
    detik, untuk menutup gangguan jaringan sesaat. Error HTTP 4xx tidak di-retry
    (biasanya berarti config salah, mis. key/tabel tidak valid).
@@ -297,19 +306,51 @@ sudo systemctl start mqtt-recorder-reconcile.service
 - **Payload tidak valid**: cek log warning "Payload tidak valid di topik" —
   berarti sensor mengirim data bukan angka.
 
+## Forecasting via script CLI (`forecasting/`)
+
+Selain lewat dashboard, forecasting bisa dijalankan langsung dari terminal di
+mesin yang punya akses ke `data/sensor_data.db` (atau `.csv`) — misalnya di VPS
+tempat recorder jalan:
+
+```bash
+cd ~/mqtt-recorder
+source venv/bin/activate
+pip install -r requirements.txt   # sekali saja (menambah prophet dkk. ke venv)
+
+python forecasting/model_training.py   # training + evaluasi backtest RMSE/MAE/MAPE
+python forecasting/predict.py          # prediksi 6 jam setelah data terakhir
+```
+
+- `model_training.py` membaca seluruh data historis, menampilkan rentang data
+  (validasi syarat minimal 7 hari), menghitung RMSE/MAE/MAPE lewat **backtest**
+  (model dilatih tanpa 24 jam terakhir -- data testing, analog "testing 1 hari"
+  di spesifikasi -- lalu memprediksinya), menyimpan metrik ke
+  `forecasting/metrics.json`, dan menyimpan model final (dilatih pada seluruh
+  data) ke `forecasting/models/`.
+- `predict.py` memuat model tersimpan dan memprediksi **6 jam setelah timestamp
+  data terakhir** (bukan jam sekarang), menampilkan tabel per jam, dan menyimpan
+  hasil ke `data/forecast_6h.csv`.
+
+Jendela forecast dinamis ini sesuai spesifikasi tugas dan klarifikasi dosen:
+prediksi selalu untuk 6 jam setelah data terakhir yang terekam, dan dosen akan
+membandingkannya dengan data aktual 6 jam setelah email pengumpulan dikirim —
+karena itu **kirim email segera setelah menjalankan prediksi** (jangan setelah
+jendela 6 jam lewat), dan **biarkan recorder tetap berjalan** setelah submit.
+
 ## Dashboard Streamlit (deploy terpisah)
 
-Dashboard di folder `streamlit/` adalah aplikasi **terpisah** dari `recorder.py` —
+Dashboard di folder `dashboard/` adalah aplikasi **terpisah** dari recorder —
 tidak jalan di VPS, tapi di-deploy ke **Streamlit Community Cloud** (gratis, dapat
 URL publik). Dashboard hanya **membaca** data lewat Supabase REST API, tidak pernah
-menulis, dan memakai `anon` key (bukan `service_role` yang dipakai `recorder.py`).
+menulis, dan memakai `anon` key (bukan `service_role` yang dipakai recorder).
 
 Tiga halaman: **Monitoring** (grafik historis, data terbaru, statistik, filter
 rentang waktu, mode real-time via polling Supabase 5 detik atau opsional MQTT
-langsung), **Forecasting** (Prophet, jendela tanggal tetap 13-21 Juli 2026 sesuai
-spek tugas, otomatis terisi begitu tanggalnya tercapai), **Data Eksplorasi**
-(statistik deskriptif, histogram, korelasi, boxplot). Ada juga komentator AI
-(Groq API, model LLaMA3 gratis).
+langsung), **Forecasting** (Prophet, prediksi **6 jam setelah waktu recording
+terakhir** -- dinamis mengikuti data, sesuai spek tugas -- plus evaluasi backtest
+RMSE/MAE/MAPE pada data testing 24 jam terakhir), **Data Eksplorasi** (statistik deskriptif,
+histogram, korelasi, boxplot). Ada juga komentator AI (Groq API, model LLaMA3
+gratis) di halaman Monitoring dan Forecasting.
 
 ### 1. Aktifkan akses baca (RLS) untuk dashboard
 
@@ -331,14 +372,15 @@ bikin key baru) — pakai nilai itu, bukan `service_role`.
 ### 2. Test lokal sebelum deploy
 
 ```bash
-cd ~/mqtt-recorder/streamlit
+cd ~/mqtt-recorder
 python3 -m venv .venv-dash
 source .venv-dash/bin/activate
 pip install -r requirements.txt
 
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-nano .streamlit/secrets.toml   # isi SUPABASE_URL, SUPABASE_ANON_KEY, GROQ_API_KEY, dll
+cp dashboard/.streamlit/secrets.toml.example dashboard/.streamlit/secrets.toml
+nano dashboard/.streamlit/secrets.toml   # isi SUPABASE_URL, SUPABASE_ANON_KEY, GROQ_API_KEY, dll
 
+cd dashboard
 streamlit run streamlit_app.py
 ```
 
@@ -346,24 +388,22 @@ Buka `http://localhost:8501` — cek halaman Monitoring update tiap ±20 detik
 (sesuai interval tulis recorder), coba toggle "Mode real-time langsung (MQTT)",
 ganti filter rentang waktu, dan klik "Minta analisis ulang" untuk uji komentator AI.
 
-Halaman **Forecasting** sebelum tanggal 20/21 Juli 2026 tercapai akan tetap
-menampilkan grafik forecast (dari data yang ada sejauh ini), tapi bagian evaluasi
-(RMSE/MAE/MAPE) akan menampilkan pesan "data testing belum tersedia" — ini normal,
-bukan bug, dan akan otomatis terisi begitu recorder merekam tanggal tersebut
-(tanpa perlu ubah kode atau redeploy).
+Halaman **Forecasting** menampilkan: rentang data historis (dengan pengecekan
+syarat minimal 7 hari), prediksi 6 jam setelah data terakhir (grafik + tabel),
+dan evaluasi backtest -- model dilatih ulang tanpa 24 jam terakhir lalu diminta
+memprediksinya, dibandingkan dengan aktual untuk menghitung RMSE/MAE/MAPE.
+Karena jendela forecast mengikuti data terakhir, halaman ini selalu memprediksi
+6 jam ke depan dari kondisi terkini tanpa perlu redeploy.
 
 ### 3. Push ke GitHub & deploy ke Streamlit Community Cloud
 
-Folder ini belum jadi git repo. Di root `~/mqtt-recorder`:
+Di root `~/mqtt-recorder`:
 
 ```bash
-git init
-git add recorder.py requirements.txt .env.example supabase_schema.sql \
-        backfill_supabase.py mqtt-recorder.service mqtt-recorder-reconcile.service \
-        mqtt-recorder-reconcile.timer README.md .gitignore streamlit
-git commit -m "Initial commit: mqtt recorder + streamlit dashboard"
-git remote add origin <url-repo-github-anda>
-git push -u origin main
+git add recording forecasting dashboard llm_integration requirements.txt \
+        .env.example supabase_schema.sql README.md .gitignore
+git commit -m "Update: restrukturisasi + forecasting dinamis"
+git push
 ```
 
 **Jangan** `git add -A` atau `git add .` — pastikan `.env` (kredensial asli) tidak
@@ -371,10 +411,9 @@ pernah ke-commit (sudah di-`.gitignore`, tapi cek ulang dengan `git status`).
 
 Lalu di [share.streamlit.io](https://share.streamlit.io):
 1. "New app" → pilih repo & branch yang baru di-push.
-2. **Main file path**: `streamlit/streamlit_app.py`.
-3. Di **Advanced settings**, pastikan requirements terbaca dari
-   `streamlit/requirements.txt` (Streamlit Cloud biasanya otomatis mendeteksi
-   requirements.txt di folder yang sama dengan main file).
+2. **Main file path**: `dashboard/streamlit_app.py`.
+3. Requirements terbaca dari `requirements.txt` di **root repo** (satu file
+   untuk semua komponen, sesuai struktur tugas).
 4. Deploy, lalu buka **Settings > Secrets** di app tersebut dan tempel isi
    `secrets.toml.example` yang sudah diisi nilai asli — **hanya `SUPABASE_ANON_KEY`,
    JANGAN PERNAH `service_role`**, karena secrets ini hidup di deployment publik.
@@ -388,12 +427,14 @@ environment). `requirements.txt` sudah pin versi (`prophet>=1.1.5,<1.2`,
 tetap gagal saat build di Cloud: halaman Monitoring & Data Eksplorasi tetap jalan
 normal (tidak bergantung Prophet), hanya halaman Forecasting yang akan
 menampilkan pesan error jelas — sebagai fallback, jalankan halaman Forecasting
-secara lokal (langkah 2 di atas) untuk kebutuhan laporan/demo.
+secara lokal (langkah 2 di atas), atau pakai script CLI
+`python forecasting/model_training.py` + `python forecasting/predict.py`
+untuk kebutuhan laporan/demo.
 
 ### Catatan toggle MQTT langsung
 
 Kalau toggle "Mode real-time langsung (MQTT)" diaktifkan, dashboard memakai
-kredensial MQTT yang sama dengan `recorder.py` (HiveMQ Cloud tidak menyediakan
+kredensial MQTT yang sama dengan recorder (HiveMQ Cloud tidak menyediakan
 ACL subscribe-only terpisah tanpa membuat credential baru manual di dashboard
 HiveMQ). Ini simplifikasi yang disengaja untuk tugas ini — kredensial broker jadi
 ikut ada di secrets deployment publik. Satu koneksi MQTT dipakai bersama untuk

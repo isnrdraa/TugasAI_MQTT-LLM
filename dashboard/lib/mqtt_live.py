@@ -1,7 +1,7 @@
 """Toggle 'real-time langsung': subscribe MQTT langsung ke HiveMQ Cloud dari
 proses Streamlit. st.cache_resource membuat ini SATU koneksi shared untuk
 seluruh proses/semua pengunjung -- bukan satu koneksi per session. Ini reuse
-pola connect yang sama dengan recorder.py di VPS."""
+pola connect yang sama dengan recording/mqtt_subscriber.py di VPS."""
 
 import ssl
 import threading

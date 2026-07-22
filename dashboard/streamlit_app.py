@@ -4,7 +4,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# dashboard/ untuk package lib, root project untuk package llm_integration & forecasting
+_DASHBOARD_DIR = Path(__file__).resolve().parent
+for _p in (str(_DASHBOARD_DIR.parent), str(_DASHBOARD_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import plotly.graph_objects as go
 import streamlit as st

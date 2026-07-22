@@ -4,7 +4,7 @@ Reconcile data/sensor_data.csv -> Supabase. Idempotent: memakai upsert
 (on_conflict=timestamp), jadi aman dipanggil berkali-kali atau dijadwalkan
 (lihat mqtt-recorder-reconcile.timer) tanpa menduplikasi baris yang sudah
 berhasil ter-push sebelumnya. Berguna untuk menutup "bolong" akibat kegagalan
-push yang lebih lama dari retry bawaan recorder.py.
+push yang lebih lama dari retry bawaan mqtt_subscriber.py.
 """
 
 import csv
@@ -16,7 +16,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-BASE_DIR = Path(__file__).resolve().parent
+# File ini ada di recording/, sedangkan .env, data/, dan logs/ ada di root project.
+BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")

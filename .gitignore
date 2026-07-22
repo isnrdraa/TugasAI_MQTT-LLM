@@ -3,7 +3,9 @@ venv/
 .venv-dash/
 data/
 logs/
-streamlit/.streamlit/secrets.toml
+dashboard/.streamlit/secrets.toml
 __pycache__/
 *.pyc
 .DS_Store
+forecasting/models/
+forecasting/metrics.json
