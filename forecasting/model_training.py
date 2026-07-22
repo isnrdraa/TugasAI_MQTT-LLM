@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Training model Prophet dari data historis + evaluasi backtest.
+"""Training model Prophet + evaluasi, sesuai jendela spesifikasi PDF penugasan.
 
-Alur:
-  1. Baca seluruh data hasil recording dari data/sensor_data.db (fallback .csv).
-  2. Resample ke rata-rata per jam, tampilkan rentang data (syarat: minimal 7 hari).
-  3. Evaluasi backtest: latih TANPA 24 jam terakhir (data testing, analog
-     "testing 1 hari" di spesifikasi), prediksi jam-jam itu, hitung
-     RMSE/MAE/MAPE terhadap data aktual -> simpan forecasting/metrics.json.
-  4. Latih model final pada SELURUH data -> simpan forecasting/models/*.json
-     (dipakai oleh predict.py).
+  Data     : diambil dari SUPABASE (REST API), dibatasi periode recording
+             13 - 20 Juli 2026 saja.
+  Training : 13 - 19 Juli 2026 (untuk model evaluasi)
+  Testing  : 20 Juli 2026 -> RMSE/MAE/MAPE -> forecasting/metrics.json
+  Model final : dilatih pada seluruh periode 13 - 20 Juli
+                -> forecasting/models/*.json (dipakai predict.py)
+
+Kredensial dibaca dari .env di root project (SUPABASE_URL + SUPABASE_ANON_KEY
+atau SUPABASE_KEY). Fallback: --source local untuk membaca data/sensor_data.db.
 
 Jalankan dari root project:
     python forecasting/model_training.py
@@ -16,6 +17,7 @@ Jalankan dari root project:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -28,43 +30,73 @@ MODELS_DIR = Path(__file__).resolve().parent / "models"
 METRICS_PATH = Path(__file__).resolve().parent / "metrics.json"
 
 
+def load_data(args):
+    start, end = core.fixed_window_bounds()
+
+    if args.source == "local":
+        print(f"Membaca data lokal dari {args.data_dir} ...")
+        raw = core.load_local_data(args.data_dir)
+    else:
+        from dotenv import load_dotenv
+
+        load_dotenv(ROOT_DIR / ".env")
+        url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_KEY", "")
+        table = os.environ.get("SUPABASE_TABLE", "sensor_data")
+        if not url or not key:
+            sys.exit(
+                "SUPABASE_URL / SUPABASE_ANON_KEY (atau SUPABASE_KEY) belum diset di .env. "
+                "Alternatif: jalankan dengan --source local jika punya data/sensor_data.db."
+            )
+        print(f"Mengambil data dari Supabase ({table}) ...")
+        raw = core.fetch_supabase_range(url, key, table, start.isoformat(), end.isoformat())
+
+    # Batasi ke periode recording sesuai PDF, apapun sumbernya
+    return raw[(raw["timestamp"] >= start) & (raw["timestamp"] < end)].reset_index(drop=True)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Training Prophet + evaluasi backtest 6 jam terakhir")
+    parser = argparse.ArgumentParser(
+        description="Training Prophet + evaluasi (training 13-19 Juli, testing 20 Juli)"
+    )
+    parser.add_argument("--source", choices=["supabase", "local"], default="supabase",
+                        help="Sumber data (default: supabase)")
     parser.add_argument("--data-dir", default=str(ROOT_DIR / "data"),
-                        help="Folder berisi sensor_data.db/sensor_data.csv (default: data/)")
+                        help="Folder sensor_data.db/.csv untuk --source local")
     args = parser.parse_args()
 
     core.require_prophet()
     from prophet.serialize import model_to_json
 
-    print(f"Membaca data dari {args.data_dir} ...")
-    raw = core.load_local_data(args.data_dir)
+    raw = load_data(args)
+    if raw.empty:
+        sys.exit("Tidak ada data pada periode 13-20 Juli 2026 di sumber yang dipilih.")
+
     hourly = core.hourly_resample(raw)
     span = core.data_span_info(hourly)
 
     print(f"  Baris mentah      : {len(raw)}")
     print(f"  Titik per jam     : {span['points']}")
     print(f"  Rentang data      : {span['first']}  s/d  {span['last']}")
-    print(f"  Durasi            : {span['days']:.2f} hari")
-    if not span["meets_min_days"]:
-        print(f"  PERINGATAN: durasi data < {core.MIN_TRAINING_DAYS} hari (syarat minimal tugas).")
+    print(f"  Durasi            : {span['days']:.2f} hari (periode PDF: {core.TRAIN_START} s/d {core.TEST_DATE})")
 
-    print(f"\nEvaluasi backtest ({core.BACKTEST_TEST_HOURS} jam terakhir sebagai data testing, "
-          "analog 'testing 1 hari' di spesifikasi) ...")
-    backtest = core.backtest_last_hours(hourly)
+    print(f"\nEvaluasi sesuai PDF: training {core.TRAIN_START} s/d {core.TRAIN_END}, "
+          f"testing {core.TEST_DATE} ...")
+    evaluation = core.evaluate_fixed(hourly)
     metrics_out = {
-        "trained_at": str(span["last"]),
+        "train_window": f"{core.TRAIN_START} s/d {core.TRAIN_END}",
+        "test_date": core.TEST_DATE,
+        "forecast_window": f"{core.FORECAST_DATE} 00:00-06:00 WIB",
         "data_first": str(span["first"]),
         "data_last": str(span["last"]),
         "data_days": round(span["days"], 3),
         "hourly_points": span["points"],
-        "backtest_test_hours": core.BACKTEST_TEST_HOURS,
     }
-    if backtest is None:
-        print("  Data belum cukup untuk backtest.")
+    if evaluation is None:
+        print("  Data training/testing belum lengkap untuk evaluasi.")
     else:
         for target in core.TARGETS:
-            m = backtest[target]["metrics"]
+            m = evaluation[target]["metrics"]
             if m is None:
                 print(f"  {target}: tidak ada titik yang bisa dibandingkan.")
                 continue
@@ -72,7 +104,7 @@ def main():
             print(f"  {target:11s}: RMSE={m['rmse']:.3f}  MAE={m['mae']:.3f}  MAPE={mape_str}")
             metrics_out[target] = m
 
-    print("\nMelatih model final pada seluruh data ...")
+    print(f"\nMelatih model final pada seluruh periode {core.TRAIN_START} s/d {core.TEST_DATE} ...")
     MODELS_DIR.mkdir(exist_ok=True)
     for target in core.TARGETS:
         model = core.fit_model(hourly, target)
@@ -82,7 +114,8 @@ def main():
 
     METRICS_PATH.write_text(json.dumps(metrics_out, indent=2), encoding="utf-8")
     print(f"  Metrik evaluasi disimpan -> {METRICS_PATH}")
-    print("\nSelesai. Jalankan 'python forecasting/predict.py' untuk prediksi 6 jam ke depan.")
+    print("\nSelesai. Jalankan 'python forecasting/predict.py' untuk prediksi "
+          f"{core.FORECAST_DATE} 00:00-06:00 WIB.")
 
 
 if __name__ == "__main__":

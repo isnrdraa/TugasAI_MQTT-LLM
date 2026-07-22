@@ -1,8 +1,12 @@
-"""Lapisan data Streamlit untuk forecasting DINAMIS: 6 jam setelah timestamp
-data TERAKHIR yang terekam (sesuai spesifikasi tugas + klarifikasi dosen),
-bukan jendela tanggal kalender tetap.
+"""Lapisan data Streamlit untuk halaman Forecasting. Semua data HANYA dari
+Supabase (MQTT tidak dipakai di sini). Dua mode jendela waktu:
 
-Logika model (Prophet, backtest, metrik) ada di forecasting/core.py di root
+1. TETAP (default, sesuai tabel PDF): data dibatasi periode recording
+   13-20 Juli 2026; training 13-19, testing 20, forecast 21 Juli 00:00-06:00.
+2. DINAMIS (klarifikasi WhatsApp): seluruh data historis, forecast 6 jam
+   setelah data terakhir, backtest 24 jam terakhir.
+
+Logika model (Prophet, split, metrik) ada di forecasting/core.py di root
 project -- dipakai bersama dengan script CLI model_training.py & predict.py.
 Modul ini hanya menambahkan: pengambilan data dari Supabase + cache Streamlit.
 """
@@ -11,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from lib import supabase_client
+from lib.config import TIMEZONE
 
 # Root project sudah ada di sys.path (di-insert oleh tiap halaman dashboard)
 from forecasting import core
@@ -20,7 +25,52 @@ Prophet = core.Prophet
 PROPHET_IMPORT_ERROR = core.PROPHET_IMPORT_ERROR
 FORECAST_HORIZON_HOURS = core.FORECAST_HORIZON_HOURS
 MIN_TRAINING_DAYS = core.MIN_TRAINING_DAYS
+TRAIN_START = core.TRAIN_START
+TRAIN_END = core.TRAIN_END
+TEST_DATE = core.TEST_DATE
+FORECAST_DATE = core.FORECAST_DATE
 forecast_table = core.forecast_table
+
+
+# ---------------------------------------------------------------------------
+# Mode TETAP (jendela kalender PDF) -- datanya statis, cache boleh lama
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_hourly_fixed() -> pd.DataFrame:
+    """Data per jam periode recording PDF saja: 13 Juli 00:00 s/d 21 Juli 00:00."""
+    start, end = core.fixed_window_bounds(TIMEZONE)
+    raw = supabase_client.fetch_all_range(
+        start.isoformat(), (end - pd.Timedelta(seconds=1)).isoformat()
+    )
+    return core.hourly_resample(raw)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def evaluate_fixed_cached() -> dict | None:
+    return core.evaluate_fixed(load_hourly_fixed())
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def forecast_fixed_cached() -> dict:
+    return core.forecast_fixed(load_hourly_fixed())
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_forecast_window_actual() -> pd.DataFrame:
+    """Data aktual per jam pada jendela forecast (21 Juli 00:00-06:00), untuk
+    verifikasi prediksi vs kenyataan -- tersedia karena recorder tetap jalan
+    setelah periode PDF berakhir."""
+    periods = core.fixed_forecast_periods(TIMEZONE)
+    end = periods[-1] + pd.Timedelta(hours=1)
+    raw = supabase_client.fetch_all_range(
+        periods[0].isoformat(), (end - pd.Timedelta(seconds=1)).isoformat()
+    )
+    return core.hourly_resample(raw)
+
+
+# ---------------------------------------------------------------------------
+# Mode DINAMIS (6 jam setelah data terakhir)
+# ---------------------------------------------------------------------------
 
 
 @st.cache_data(ttl=300, show_spinner=False)

@@ -4,18 +4,14 @@
   - forecasting/predict.py         (CLI: prediksi 6 jam ke depan)
   - dashboard/lib/forecasting.py   (halaman Forecasting di Streamlit)
 
-Sesuai spesifikasi tugas (dan klarifikasi dosen di WhatsApp), jendela forecast
-bersifat DINAMIS: 6 jam setelah timestamp data TERAKHIR yang terekam -- bukan
-tanggal kalender tetap. Karena recorder terus berjalan, "data terakhir" selalu
-mendekati waktu sekarang, sehingga forecast selalu murni masa depan pada saat
-dihitung. Dosen memverifikasi dengan membandingkan prediksi ini terhadap data
-aktual yang terekam 6 jam setelah email dikirim.
+Ada DUA mode jendela waktu, dua-duanya bersumber HANYA dari data Supabase:
 
-Evaluasi (RMSE/MAE/MAPE) memakai BACKTEST dengan data testing = 24 JAM
-TERAKHIR: model dilatih ulang tanpa 24 jam terakhir, lalu diminta memprediksi
-jam-jam tersebut dan dibandingkan dengan data aktualnya. Ini analog dinamis
-dari spesifikasi PDF (training 6 hari + testing 1 hari penuh), digeser
-mengikuti data terakhir karena periode recording diperpanjang dosen.
+1. TETAP (default, sesuai tabel spesifikasi PDF): training 13-19 Juli,
+   testing 20 Juli (RMSE/MAE/MAPE), forecast 21 Juli 00:00-06:00 WIB --
+   yaitu 6 jam setelah akhir periode recording 13-20 Juli.
+2. DINAMIS (sesuai klarifikasi WhatsApp dosen): forecast 6 jam setelah
+   timestamp data TERAKHIR yang terekam; evaluasi backtest dengan data
+   testing = 24 jam terakhir (analog "testing 1 hari").
 """
 
 import logging
@@ -40,6 +36,108 @@ FORECAST_HORIZON_HOURS = 6
 BACKTEST_TEST_HOURS = 24  # data testing = 24 jam terakhir (analog "testing 1 hari" di PDF)
 MIN_TRAINING_DAYS = 7  # "Minimal ada 7 hari data" (spek tugas)
 DEFAULT_TZ = ZoneInfo("Asia/Jakarta")
+
+# --- Jendela kalender TETAP sesuai tabel spesifikasi PDF penugasan ---
+#   Training : 13 - 19 Juli 2026 (6 hari)
+#   Testing  : 20 Juli 2026 (1 hari, untuk RMSE/MAE/MAPE)
+#   Forecast : 21 Juli 2026, 00:00 - 06:00 WIB (per jam, 6 titik)
+TRAIN_START = "2026-07-13"
+TRAIN_END = "2026-07-19"
+TEST_DATE = "2026-07-20"
+FORECAST_DATE = "2026-07-21"
+
+
+def fixed_window_bounds(tz=DEFAULT_TZ) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """(start, end-eksklusif) rentang data mode PDF: 13 Juli 00:00 s/d
+    21 Juli 00:00 = periode recording 13-20 Juli."""
+    start = pd.Timestamp(TRAIN_START, tz=tz)
+    end = pd.Timestamp(TEST_DATE, tz=tz) + pd.Timedelta(days=1)
+    return start, end
+
+
+def fixed_forecast_periods(tz=DEFAULT_TZ) -> pd.DatetimeIndex:
+    """6 titik per jam untuk 21 Juli 00:00-06:00 WIB. Label bin 00:00 s/d
+    05:00, konsisten dengan label kiri hasil resample per jam data historis."""
+    return pd.date_range(f"{FORECAST_DATE} 00:00", periods=FORECAST_HORIZON_HOURS, freq="1h", tz=tz)
+
+
+def split_fixed_train_test(hourly_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    tz = hourly_df["timestamp"].dt.tz
+    test_start = pd.Timestamp(TEST_DATE, tz=tz)
+    test_end = test_start + pd.Timedelta(days=1)
+    train = hourly_df[hourly_df["timestamp"] < test_start]
+    test = hourly_df[(hourly_df["timestamp"] >= test_start) & (hourly_df["timestamp"] < test_end)]
+    return train, test
+
+
+def evaluate_fixed(hourly_df: pd.DataFrame) -> dict | None:
+    """Evaluasi sesuai PDF: model dilatih pada 13-19 Juli, diminta memprediksi
+    per jam tanggal 20 Juli, dibandingkan dengan aktualnya (RMSE/MAE/MAPE)."""
+    train_df, test_df = split_fixed_train_test(hourly_df)
+    if train_df.empty or test_df.empty:
+        return None
+
+    periods = pd.DatetimeIndex(test_df["timestamp"])
+    results = {"train_points": len(train_df), "test_points": len(test_df)}
+    for target in TARGETS:
+        forecast = fit_and_forecast(train_df, target, periods)
+        actual = test_df[["timestamp", target]].rename(columns={"timestamp": "ds"})
+        merged = actual.merge(forecast, on="ds", how="inner").dropna(subset=[target, "yhat"])
+        results[target] = {
+            "forecast": forecast,
+            "merged": merged,
+            "metrics": metrics(merged[target], merged["yhat"]) if not merged.empty else None,
+        }
+    return results
+
+
+def forecast_fixed(hourly_df: pd.DataFrame) -> dict:
+    """Forecast 21 Juli 00:00-06:00 WIB. Model final dilatih pada SELURUH
+    periode recording (13-20 Juli), sesuai kalimat spesifikasi 'menggunakan
+    data historis yang telah dikumpulkan' (evaluasi tetap memakai model yang
+    dilatih tanpa hari testing, lihat evaluate_fixed)."""
+    tz = hourly_df["timestamp"].dt.tz
+    periods = fixed_forecast_periods(tz)
+    result = {"periods": periods, "last_ts": hourly_df["timestamp"].iloc[-1]}
+    for target in TARGETS:
+        result[target] = fit_and_forecast(hourly_df, target, periods)
+    return result
+
+
+def fetch_supabase_range(url: str, key: str, table: str, start_iso: str, end_iso: str,
+                         page_size: int = 10000, max_pages: int = 200, tz=DEFAULT_TZ) -> pd.DataFrame:
+    """Ambil data dari Supabase REST API (paginated, bebas Streamlit) -- dipakai
+    script CLI supaya sumber data seragam: semuanya dari Supabase."""
+    import requests
+
+    endpoint = url.rstrip("/") + f"/rest/v1/{table}"
+    headers = {"apikey": key, "Authorization": f"Bearer {key}"}
+
+    frames = []
+    cursor = None
+    for _ in range(max_pages):
+        params = {
+            "select": "timestamp,suhu,kelembaban",
+            "timestamp": [f"gt.{cursor}" if cursor else f"gte.{start_iso}", f"lte.{end_iso}"],
+            "order": "timestamp.asc",
+            "limit": page_size,
+        }
+        resp = requests.get(endpoint, headers=headers, params=params, timeout=30)
+        resp.raise_for_status()
+        rows = resp.json()
+        if not rows:
+            break
+        frames.append(pd.DataFrame(rows))
+        cursor = rows[-1]["timestamp"]  # strictly increasing (unique constraint)
+
+    if not frames:
+        return pd.DataFrame(columns=["timestamp", "suhu", "kelembaban"])
+
+    df = pd.concat(frames, ignore_index=True)
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).dt.tz_convert(tz)
+    df["suhu"] = pd.to_numeric(df["suhu"], errors="coerce")
+    df["kelembaban"] = pd.to_numeric(df["kelembaban"], errors="coerce")
+    return df.sort_values("timestamp").reset_index(drop=True)
 
 
 def load_local_data(data_dir) -> pd.DataFrame:

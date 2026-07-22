@@ -308,34 +308,28 @@ sudo systemctl start mqtt-recorder-reconcile.service
 
 ## Forecasting via script CLI (`forecasting/`)
 
-Selain lewat dashboard, forecasting bisa dijalankan langsung dari terminal di
-mesin yang punya akses ke `data/sensor_data.db` (atau `.csv`) — misalnya di VPS
-tempat recorder jalan:
+Selain lewat dashboard, forecasting bisa dijalankan langsung dari terminal.
+Data diambil **dari Supabase** (butuh `SUPABASE_URL` + `SUPABASE_ANON_KEY`
+atau `SUPABASE_KEY` di `.env` root project), dibatasi persis periode recording
+spesifikasi PDF (13-20 Juli 2026):
 
 ```bash
-cd ~/mqtt-recorder
-source venv/bin/activate
-pip install -r requirements.txt   # sekali saja (menambah prophet dkk. ke venv)
+pip install -r requirements.txt   # sekali saja
 
-python forecasting/model_training.py   # training + evaluasi backtest RMSE/MAE/MAPE
-python forecasting/predict.py          # prediksi 6 jam setelah data terakhir
+python forecasting/model_training.py   # training + evaluasi RMSE/MAE/MAPE (testing 20 Juli)
+python forecasting/predict.py          # prediksi 21 Juli 00:00-06:00 WIB
 ```
 
-- `model_training.py` membaca seluruh data historis, menampilkan rentang data
-  (validasi syarat minimal 7 hari), menghitung RMSE/MAE/MAPE lewat **backtest**
-  (model dilatih tanpa 24 jam terakhir -- data testing, analog "testing 1 hari"
-  di spesifikasi -- lalu memprediksinya), menyimpan metrik ke
-  `forecasting/metrics.json`, dan menyimpan model final (dilatih pada seluruh
-  data) ke `forecasting/models/`.
-- `predict.py` memuat model tersimpan dan memprediksi **6 jam setelah timestamp
-  data terakhir** (bukan jam sekarang), menampilkan tabel per jam, dan menyimpan
-  hasil ke `data/forecast_6h.csv`.
-
-Jendela forecast dinamis ini sesuai spesifikasi tugas dan klarifikasi dosen:
-prediksi selalu untuk 6 jam setelah data terakhir yang terekam, dan dosen akan
-membandingkannya dengan data aktual 6 jam setelah email pengumpulan dikirim —
-karena itu **kirim email segera setelah menjalankan prediksi** (jangan setelah
-jendela 6 jam lewat), dan **biarkan recorder tetap berjalan** setelah submit.
+- `model_training.py` mengambil data 13-20 Juli dari Supabase, melatih model
+  evaluasi pada data training (13-19 Juli), menghitung RMSE/MAE/MAPE pada data
+  testing (20 Juli), menyimpan metrik ke `forecasting/metrics.json`, lalu
+  melatih model final pada seluruh periode 13-20 Juli dan menyimpannya ke
+  `forecasting/models/`. (Fallback: `--source local` untuk membaca
+  `data/sensor_data.db` tanpa koneksi Supabase.)
+- `predict.py` memuat model tersimpan dan memprediksi jendela forecast
+  spesifikasi: **21 Juli 2026, 00:00-06:00 WIB** (per jam, 6 titik) — yaitu
+  6 jam setelah akhir periode recording — lalu menyimpan hasil ke
+  `data/forecast_6h.csv`.
 
 ## Dashboard Streamlit (deploy terpisah)
 
@@ -346,11 +340,13 @@ menulis, dan memakai `anon` key (bukan `service_role` yang dipakai recorder).
 
 Tiga halaman: **Monitoring** (grafik historis, data terbaru, statistik, filter
 rentang waktu, mode real-time via polling Supabase 5 detik atau opsional MQTT
-langsung), **Forecasting** (Prophet, prediksi **6 jam setelah waktu recording
-terakhir** -- dinamis mengikuti data, sesuai spek tugas -- plus evaluasi backtest
-RMSE/MAE/MAPE pada data testing 24 jam terakhir), **Data Eksplorasi** (statistik deskriptif,
-histogram, korelasi, boxplot). Ada juga komentator AI (Groq API, model LLaMA3
-gratis) di halaman Monitoring dan Forecasting.
+langsung -- MQTT hanya untuk tampilan live, bukan sumber data), **Forecasting**
+(Prophet, dua mode: default **jendela tetap sesuai PDF** -- training 13-19 Juli,
+testing 20 Juli dengan RMSE/MAE/MAPE, forecast 21 Juli 00:00-06:00 WIB, plus
+verifikasi prediksi vs aktual pada jendela forecast; atau mode **dinamis** 6 jam
+setelah data terakhir sesuai klarifikasi WhatsApp dosen), **Data Eksplorasi**
+(statistik deskriptif, histogram, korelasi, boxplot). Ada juga komentator AI
+(Groq API, model LLaMA3 gratis) di halaman Monitoring dan Forecasting.
 
 ### 1. Aktifkan akses baca (RLS) untuk dashboard
 
@@ -388,12 +384,11 @@ Buka `http://localhost:8501` — cek halaman Monitoring update tiap ±20 detik
 (sesuai interval tulis recorder), coba toggle "Mode real-time langsung (MQTT)",
 ganti filter rentang waktu, dan klik "Minta analisis ulang" untuk uji komentator AI.
 
-Halaman **Forecasting** menampilkan: rentang data historis (dengan pengecekan
-syarat minimal 7 hari), prediksi 6 jam setelah data terakhir (grafik + tabel),
-dan evaluasi backtest -- model dilatih ulang tanpa 24 jam terakhir lalu diminta
-memprediksinya, dibandingkan dengan aktual untuk menghitung RMSE/MAE/MAPE.
-Karena jendela forecast mengikuti data terakhir, halaman ini selalu memprediksi
-6 jam ke depan dari kondisi terkini tanpa perlu redeploy.
+Halaman **Forecasting** default menampilkan jendela tetap sesuai PDF: rentang
+data periode recording 13-20 Juli, prediksi 21 Juli 00:00-06:00 WIB (grafik +
+tabel + verifikasi vs aktual karena datanya sudah terekam), dan evaluasi
+RMSE/MAE/MAPE pada data testing 20 Juli. Radio di atas halaman bisa memindah
+ke mode dinamis (6 jam setelah data terakhir, backtest 24 jam terakhir).
 
 ### 3. Push ke GitHub & deploy ke Streamlit Community Cloud
 

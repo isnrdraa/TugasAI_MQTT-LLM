@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Prediksi suhu & kelembaban 6 JAM SETELAH WAKTU RECORDING TERAKHIR.
+"""Prediksi suhu & kelembaban untuk jendela forecasting spesifikasi PDF:
+21 Juli 2026, 00:00 - 06:00 WIB (per jam, 6 titik) -- yaitu 6 jam setelah
+akhir periode recording 13-20 Juli.
 
 Memakai model hasil forecasting/model_training.py (jalankan itu dulu).
-Timestamp target dihitung dari data terakhir di data/sensor_data.db/.csv,
-BUKAN dari jam sekarang -- sesuai spesifikasi tugas.
 
 Jalankan dari root project:
     python forecasting/predict.py
@@ -14,6 +14,8 @@ Output: tabel prediksi di terminal + data/forecast_6h.csv.
 import argparse
 import sys
 from pathlib import Path
+
+import pandas as pd
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
@@ -39,22 +41,19 @@ def load_models():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Prediksi 6 jam setelah data terakhir")
-    parser.add_argument("--data-dir", default=str(ROOT_DIR / "data"),
-                        help="Folder berisi sensor_data.db/sensor_data.csv (default: data/)")
-    parser.add_argument("--hours", type=int, default=core.FORECAST_HORIZON_HOURS,
-                        help="Horizon prediksi dalam jam (default: 6)")
+    parser = argparse.ArgumentParser(
+        description=f"Prediksi {core.FORECAST_DATE} 00:00-06:00 WIB (jendela spesifikasi PDF)"
+    )
+    parser.add_argument("--out-dir", default=str(ROOT_DIR / "data"),
+                        help="Folder output forecast_6h.csv (default: data/)")
     args = parser.parse_args()
 
-    raw = core.load_local_data(args.data_dir)
-    last_ts = raw["timestamp"].iloc[-1]
-    periods = core.forecast_periods(last_ts, args.hours)
-
-    print(f"Data terakhir terekam : {last_ts}")
-    print(f"Jendela prediksi      : {periods[0]}  s/d  {periods[-1]}  ({args.hours} jam)\n")
+    periods = core.fixed_forecast_periods()
+    print(f"Periode recording : {core.TRAIN_START} s/d {core.TEST_DATE} (sumber: Supabase, via model tersimpan)")
+    print(f"Jendela prediksi  : {periods[0]}  s/d  {periods[-1] + pd.Timedelta(hours=1)}  (6 jam)\n")
 
     models = load_models()
-    result = {"periods": periods, "last_ts": last_ts}
+    result = {"periods": periods}
     for target in core.TARGETS:
         result[target] = core.predict_at(models[target], periods, tz=periods.tz)
 
@@ -63,11 +62,11 @@ def main():
     table_print["Jam"] = table_print["Jam"].dt.strftime("%Y-%m-%d %H:%M")
     print(table_print.to_string(index=False, float_format=lambda v: f"{v:.2f}"))
 
-    out_path = Path(args.data_dir) / "forecast_6h.csv"
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "forecast_6h.csv"
     table.to_csv(out_path, index=False)
     print(f"\nHasil prediksi disimpan -> {out_path}")
-    print("Catatan: kirim email/laporan SEBELUM jendela 6 jam ini lewat, "
-          "karena dosen membandingkan prediksi dengan data aktual setelah jam email.")
 
 
 if __name__ == "__main__":
